@@ -1,9 +1,15 @@
 
 import { Router, Request, Response } from "express";
 import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 
 const router = Router();
+
+const PLACEHOLDER_JWT_SECRET =
+  "replace_with_a_long_random_secret";
+
+// -------------------- SIGNUP --------------------
 
 router.post(
   "/signup",
@@ -11,8 +17,16 @@ router.post(
     try {
       const { name, email, password, role } = req.body;
 
-      // 1. Validate required fields
-      if (!name || !email || !password || !role) {
+      // Validate required fields
+      if (
+        typeof name !== "string" ||
+        typeof email !== "string" ||
+        typeof password !== "string" ||
+        !name.trim() ||
+        !email.trim() ||
+        !password ||
+        !role
+      ) {
         res.status(400).json({
           success: false,
           message: "All fields are required"
@@ -20,7 +34,7 @@ router.post(
         return;
       }
 
-      // 2. Validate role
+      // Validate role
       if (!["brand", "creator"].includes(role)) {
         res.status(400).json({
           success: false,
@@ -29,8 +43,8 @@ router.post(
         return;
       }
 
-      // 3. Validate password length
-      if (typeof password !== "string" || password.length < 8) {
+      // Validate password length
+      if (password.length < 8) {
         res.status(400).json({
           success: false,
           message: "Password must contain at least 8 characters"
@@ -38,15 +52,7 @@ router.post(
         return;
       }
 
-      // 4. Normalize and validate email
-      if (typeof email !== "string") {
-        res.status(400).json({
-          success: false,
-          message: "Invalid email"
-        });
-        return;
-      }
-
+      // Normalize and validate email
       const normalizedEmail = email.trim().toLowerCase();
 
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
@@ -57,7 +63,7 @@ router.post(
         return;
       }
 
-      // 5. Check for an existing user
+      // Check for an existing user
       const existingUser = await User.findOne({
         email: normalizedEmail
       });
@@ -70,10 +76,10 @@ router.post(
         return;
       }
 
-      // 6. Hash the password
+      // Hash the password
       const hashedPassword = await bcrypt.hash(password, 12);
 
-      // 7. Save the user
+      // Save the user
       const user = await User.create({
         name: name.trim(),
         email: normalizedEmail,
@@ -81,7 +87,7 @@ router.post(
         role
       });
 
-      // 8. Return safe user details
+      // Return safe user details
       res.status(201).json({
         success: true,
         message: "Account created successfully",
@@ -92,8 +98,8 @@ router.post(
           role: user.role
         }
       });
-    } catch (error) {
-      // Handle duplicate email attempts safely
+    } catch (error: unknown) {
+      // Handle duplicate email attempts
       if (
         typeof error === "object" &&
         error !== null &&
@@ -117,7 +123,7 @@ router.post(
   }
 );
 
-
+// -------------------- LOGIN --------------------
 
 router.post(
   "/login",
@@ -125,7 +131,7 @@ router.post(
     try {
       const { email, password } = req.body;
 
-      // 1. Validate required fields
+      // Validate required fields
       if (
         typeof email !== "string" ||
         typeof password !== "string" ||
@@ -139,7 +145,26 @@ router.post(
         return;
       }
 
-      // 2. Find user and explicitly include password
+      // Check JWT configuration before processing login
+      const jwtSecret = process.env.JWT_SECRET;
+
+      if (
+        !jwtSecret ||
+        !jwtSecret.trim() ||
+        jwtSecret === PLACEHOLDER_JWT_SECRET
+      ) {
+        console.error(
+          "Login failed: JWT_SECRET is missing or still set to the placeholder."
+        );
+
+        res.status(500).json({
+          success: false,
+          message: "Server authentication is not configured"
+        });
+        return;
+      }
+
+      // Find user and explicitly include password
       const user = await User.findOne({
         email: email.trim().toLowerCase()
       }).select("+password");
@@ -152,7 +177,7 @@ router.post(
         return;
       }
 
-      // 3. Compare provided password with stored hash
+      // Compare provided password with stored hash
       const isPasswordValid = await bcrypt.compare(
         password,
         user.password
@@ -166,28 +191,19 @@ router.post(
         return;
       }
 
-      // 4. Check JWT secret
-      const jwtSecret = process.env.JWT_SECRET;
-
-      if (!jwtSecret || jwtSecret === "replace_with_a_long_random_secret") {
-        res.status(500).json({
-          success: false,
-          message: "Server authentication is not configured"
-        });
-        return;
-      }
-
-      // 5. Generate JWT
-      const token = require("jsonwebtoken").sign(
+      // Generate JWT
+      const token = jwt.sign(
         {
           userId: user._id.toString(),
           role: user.role
         },
         jwtSecret,
-        { expiresIn: "1h" }
+        {
+          expiresIn: "1h"
+        }
       );
 
-      // 6. Return token and safe user details
+      // Return token and safe user details
       res.status(200).json({
         success: true,
         message: "Login successful",
@@ -199,7 +215,7 @@ router.post(
           role: user.role
         }
       });
-    } catch (error) {
+    } catch (error: unknown) {
       console.error("Login error:", error);
 
       res.status(500).json({
@@ -209,6 +225,5 @@ router.post(
     }
   }
 );
-
 
 export default router;
